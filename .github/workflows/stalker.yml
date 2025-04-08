@@ -1,0 +1,73 @@
+name: Run Stalker Portal (Every 4 Hours)
+
+on:
+  push:
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours
+
+jobs:
+  stalker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240  # Auto kill after 4 hours
+
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: stalker
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Apache, PHP, MySQL
+        run: |
+          sudo apt update
+          sudo apt install -y apache2 php libapache2-mod-php php-mysql
+          sudo cp -r . /var/www/html
+          sudo systemctl start apache2
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h "127.0.0.1" --silent; then
+              echo "✅ MySQL is up!"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Optional DB Import
+        run: |
+          if [ -f ./sql/init.sql ]; then
+            mysql -h 127.0.0.1 -u root -proot stalker < ./sql/init.sql
+          else
+            echo "⚠️ No SQL file found, skipping import."
+          fi
+
+      - name: Expose with Ngrok
+        uses: coderaiser/ngrok-action@v1
+        with:
+          token: ${{ secrets.NGROK_TOKEN }}
+          port: 80
+
+      - name: ⏱ Live Time Counter (4 Hours)
+        run: |
+          echo "🚀 Starting 4-hour uptime log..."
+          start_time=$(date +%s)
+          for ((i=0; i<14400; i++)); do
+            elapsed=$(( $(date +%s) - start_time ))
+            hrs=$((elapsed / 3600))
+            mins=$(( (elapsed % 3600) / 60 ))
+            secs=$((elapsed % 60))
+            printf "⏱ Uptime: %02d:%02d:%02d\n" $hrs $mins $secs
+            sleep 1
+          done
